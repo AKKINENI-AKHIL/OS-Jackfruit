@@ -39,7 +39,14 @@
  *   - remember whether the soft-limit warning was already emitted
  *   - include `struct list_head` linkage
  * ============================================================== */
-
+struct monitor_node {
+    pid_t pid;
+    char container_id[MONITOR_NAME_LEN];
+    unsigned long soft_limit_bytes;
+    unsigned long hard_limit_bytes;
+    bool soft_limit_warned;
+    struct list_head list;
+};
 
 /* ==============================================================
  * TODO 2: Declare the global monitored list and a lock.
@@ -51,6 +58,8 @@
  * You may choose either a mutex or a spinlock, but your README must
  * justify the choice in terms of the code paths you implemented.
  * ============================================================== */
+static LIST_HEAD(monitor_list);
+static DEFINE_SPINLOCK(monitor_lock);
 
 
 /* --- Provided: internal device / timer state --- */
@@ -133,6 +142,9 @@ static void kill_process(const char *container_id,
  * --------------------------------------------------------------- */
 static void timer_callback(struct timer_list *t)
 {
+    struct monitor_node *node, *tmp;
+    long rss_bytes;
+
     /* ==============================================================
      * TODO 3: Implement periodic monitoring.
      *
@@ -143,6 +155,25 @@ static void timer_callback(struct timer_list *t)
      *   - enforce hard limit and then remove the entry
      *   - avoid use-after-free while deleting during iteration
      * ============================================================== */
+    spin_lock_bh(&monitor_lock);
+    list_for_each_entry_safe(node, tmp, &monitor_list, list) {
+        rss_bytes = get_rss_bytes(node->pid);
+        if (rss_bytes < 0) {
+            list_del(&node->list);
+            kfree(node);
+            continue;
+        }
+
+        if (rss_bytes > node->hard_limit_bytes) {
+            kill_process(node->container_id, node->pid, node->hard_limit_bytes, rss_bytes);
+            list_del(&node->list);
+            kfree(node);
+        } else if (rss_bytes > node->soft_limit_bytes && !node->soft_limit_warned) {
+            log_soft_limit_event(node->container_id, node->pid, node->soft_limit_bytes, rss_bytes);
+            node->soft_limit_warned = true;
+        }
+    }
+    spin_unlock_bh(&monitor_lock);
 
     mod_timer(&monitor_timer, jiffies + CHECK_INTERVAL_SEC * HZ);
 }
@@ -167,6 +198,8 @@ static long monitor_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
         return -EFAULT;
 
     if (cmd == MONITOR_REGISTER) {
+        struct monitor_node *node;
+
         printk(KERN_INFO
                "[container_monitor] Registering container=%s pid=%d soft=%lu hard=%lu\n",
                req.container_id, req.pid, req.soft_limit_bytes, req.hard_limit_bytes);
@@ -179,6 +212,23 @@ static long monitor_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
          *   - validate allocation and limits
          *   - insert into the shared list under the chosen lock
          * ============================================================== */
+        if (req.soft_limit_bytes > req.hard_limit_bytes)
+            return -EINVAL;
+
+        node = kmalloc(sizeof(*node), GFP_KERNEL);
+        if (!node)
+            return -ENOMEM;
+
+        node->pid = req.pid;
+        strncpy(node->container_id, req.container_id, MONITOR_NAME_LEN);
+        node->container_id[MONITOR_NAME_LEN - 1] = '\0';
+        node->soft_limit_bytes = req.soft_limit_bytes;
+        node->hard_limit_bytes = req.hard_limit_bytes;
+        node->soft_limit_warned = false;
+
+        spin_lock_bh(&monitor_lock);
+        list_add(&node->list, &monitor_list);
+        spin_unlock_bh(&monitor_lock);
 
         return 0;
     }
@@ -195,6 +245,24 @@ static long monitor_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
      *   - remove the matching entry safely if found
      *   - return status indicating whether a matching entry was removed
      * ============================================================== */
+    {
+        struct monitor_node *node, *tmp;
+        int found = 0;
+
+        spin_lock_bh(&monitor_lock);
+        list_for_each_entry_safe(node, tmp, &monitor_list, list) {
+            if (node->pid == req.pid && strncmp(node->container_id, req.container_id, MONITOR_NAME_LEN) == 0) {
+                list_del(&node->list);
+                kfree(node);
+                found = 1;
+                break;
+            }
+        }
+        spin_unlock_bh(&monitor_lock);
+
+        if (found)
+            return 0;
+    }
 
     return -ENOENT;
 }
@@ -245,6 +313,8 @@ static int __init monitor_init(void)
 /* --- Provided: Module Exit --- */
 static void __exit monitor_exit(void)
 {
+    struct monitor_node *node, *tmp;
+
     del_timer_sync(&monitor_timer);
 
     /* ==============================================================
@@ -254,6 +324,12 @@ static void __exit monitor_exit(void)
      *   - remove and free every list node safely
      *   - leave no leaked state on module unload
      * ============================================================== */
+    spin_lock_bh(&monitor_lock);
+    list_for_each_entry_safe(node, tmp, &monitor_list, list) {
+        list_del(&node->list);
+        kfree(node);
+    }
+    spin_unlock_bh(&monitor_lock);
 
     cdev_del(&c_dev);
     device_destroy(cl, dev_num);
