@@ -125,9 +125,9 @@ The screenshots below are stored in `outputs/` and are embedded inline so they r
 
 ### Multi-container supervision
 
-![Supervisor managing multiple containers](outputs/01-multi-container-supervision-1.png)
+![Supervisor managing multiple containers](outputs/1.png)
 
-![Supervisor managing multiple containers, alternate view](outputs/01-multi-container-supervision-2.png)
+![Supervisor managing multiple containers, alternate view](outputs/2.png)
 
 One supervisor manages two live containers at the same time.
 
