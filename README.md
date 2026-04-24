@@ -133,43 +133,46 @@ One supervisor manages two live containers at the same time.
 
 ### Metadata tracking
 
-![Metadata tracking](outputs/02-metadata-tracking.png)
+![Metadata tracking](outputs/3.png)
 
 `ps` shows container IDs, host PIDs, states, limits, nice values, and start times.
 
 ### Bounded-buffer logging
 
-![Bounded-buffer logging](outputs/03-bounded-buffer-logging.png)
+![Bounded-buffer logging](outputs/4.png)
 
 Container output is captured through the logging pipeline and persisted to per-container log files.
 
 ### CLI and IPC
 
-![CLI and IPC](outputs/04-cli-ipc.png)
+![CLI and IPC](outputs/5.png)
 
 A CLI command reaches the supervisor over the control channel and returns an explicit response.
 
 ### Soft-limit warning
 
-![Soft-limit warning](outputs/05-soft-limit-warning.png)
+![Soft-limit warning](outputs/6.png)
 
 `dmesg` shows a soft-limit warning without killing the container.
 
 ### Hard-limit enforcement
 
-![Hard-limit enforcement](outputs/06-hard-limit-enforcement.png)
+![Hard-limit enforcement](outputs/7.png)
+![](outputs/7b.png)
 
 `dmesg` and container state show that the hard limit terminated the workload.
 
 ### Scheduling experiment
 
-![Scheduling experiment](outputs/07-scheduling-experiment.png)
+![Scheduling experiment](outputs/8.png)
+![](outputs/8b.png)
+![](outputs/8c.png)
 
 Two CPU-bound containers are run with different `nice` values for a scheduler comparison.
 
 ### Clean teardown
 
-![Clean teardown](outputs/08-clean-teardown.png)
+![Clean teardown](outputs/9.png)
 
 Shutdown completes cleanly with reaping, log flush, and module unload.
 
